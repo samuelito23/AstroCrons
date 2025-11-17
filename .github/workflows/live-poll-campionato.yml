@@ -1,0 +1,79 @@
+name: Live updates (poll) – Campionato
+
+on:
+  schedule:
+    - cron: "*/20 * * * MON,FRI,SAT,SUN"
+  workflow_dispatch:
+
+jobs:
+  call-live-poll-campionato:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chiama /internal/cron/live
+        env:
+          BACKEND_BASE_URL: https://astro-league-hub-api.onrender.com
+          CRON_SECRET: oC53qdSzDTW0VV0HrDHTmr8FD12C9rtFKEpvAAWL4UBYTiPCFojniACyQDoDsJqX
+        run: |
+          set -euo pipefail
+
+          command -v jq >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y jq; }
+
+          attempt=0
+          max_attempts=3
+          delay=3
+
+          while (( attempt < max_attempts )); do
+            attempt=$((attempt+1))
+            echo "Tentativo $attempt/$max_attempts..."
+
+            : > response.json  # pre-crea il file, così gli step dopo non falliscono mai
+
+            http_code=$(
+              curl -sS -X POST \
+                -H "X-CRON-SECRET: ${CRON_SECRET}" \
+                -H "Accept: application/json" \
+                --connect-timeout 20 --max-time 300 \
+                --fail-with-body \
+                -o response.json -w "%{http_code}" \
+                "${BACKEND_BASE_URL}/internal/cron/live" \
+              || true
+            )
+
+            # Se il file è vuoto (es. timeout rete), metti un JSON minimo
+            if [[ ! -s response.json ]]; then echo '{"success":false,"error":{"message":"no-body"}}' > response.json; fi
+
+            status=$(jq -r 'if .success==true then (.data.status // "ok") else (.error.message // "error") end' response.json 2>/dev/null || echo "unknown")
+            log_compact=$(jq -c '.' response.json 2>/dev/null || tr -d '\n' < response.json)
+
+            echo "${status} - ${log_compact}"
+            echo "HTTP ${http_code}"
+
+            {
+              echo "### Live poll"
+              echo "- HTTP: **${http_code}**"
+              echo "- Status: \`${status}\`"
+              echo "- Matches: $(jq -r '.data.matches // 0' response.json 2>/dev/null || echo 0)"
+              echo "- Events: $(jq -r '.data.events // 0' response.json 2>/dev/null || echo 0)"
+              echo "- Notified: $(jq -r '.data.notified // 0' response.json 2>/dev/null || echo 0)"
+              echo ""
+              echo "<details><summary>Payload</summary>"
+              echo ""
+              echo '```json'
+              cat response.json
+              echo '```'
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            if [[ "${http_code}" == "200" || "${http_code}" == "409" ]]; then
+              echo ""; echo "✅ Live poll OK (HTTP ${http_code})"
+              exit 0
+            fi
+
+            echo "⚠️  Live poll non riuscito (HTTP ${http_code}), backoff ${delay}s..."
+            sleep "${delay}"
+            if (( delay < 30 )); then delay=$(( delay * 2 )); fi
+          done
+
+          echo "❌ Live poll fallito dopo ${max_attempts} tentativi"
+          exit 1
+

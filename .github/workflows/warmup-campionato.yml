@@ -1,0 +1,78 @@
+name: Cache warmup (last/next/rankings) – Campionato
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # 06:00 ITA in estate
+    - cron: "0 5 * * *"   # 06:00 ITA in inverno
+    - cron: "0 13 * * *"  # 15:00 ITA in estate
+    - cron: "0 14 * * *"  # 15:00 ITA in inverno
+  workflow_dispatch:
+
+jobs:
+  call-warmup-campionato:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chiama /internal/cron/warmup
+        env:
+          BACKEND_BASE_URL: https://astro-league-hub-api.onrender.com
+          CRON_SECRET: oC53qdSzDTW0VV0HrDHTmr8FD12C9rtFKEpvAAWL4UBYTiPCFojniACyQDoDsJqX
+        run: |
+            set -euo pipefail
+            command -v jq >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y jq; }
+
+            attempt=0
+            max_attempts=3
+            delay=3
+
+            while (( attempt < max_attempts )); do
+              attempt=$((attempt+1))
+              echo "Tentativo $attempt/$max_attempts..."
+
+              : > response.json
+
+              http_code=$(
+                curl -sS -X POST \
+                  -H "X-CRON-SECRET: ${CRON_SECRET}" \
+                  -H "Accept: application/json" \
+                  --connect-timeout 20 --max-time 300 \
+                  --fail-with-body \
+                  -o response.json -w "%{http_code}" \
+                  "${BACKEND_BASE_URL}/internal/cron/warmup" \
+                || true
+              )
+              if [[ ! -s response.json ]]; then echo '{"success":false,"error":{"message":"no-body"}}' > response.json; fi
+
+              status=$(jq -r 'if .success==true then (.data.status // "ok") else (.error.message // "error") end' response.json 2>/dev/null || echo "unknown")
+              log_compact=$(jq -c '.' response.json 2>/dev/null || tr -d '\n' < response.json)
+
+              echo "${status} - ${log_compact}"
+              echo "HTTP ${http_code}"
+
+              {
+                echo "### Cache warmup"
+                echo "- HTTP: **${http_code}**"
+                echo "- Status: \`${status}\`"
+                echo "- Last count: $(jq -r '.data.sections.last_next.last_count // 0' response.json 2>/dev/null || echo 0)"
+                echo "- Next count: $(jq -r '.data.sections.last_next.next_count // 0' response.json 2>/dev/null || echo 0)"
+                echo "- Rankings count: $(jq -r '.data.sections.rankings.count // 0' response.json 2>/dev/null || echo 0)"
+                echo ""
+                echo "<details><summary>Payload</summary>"
+                echo ""
+                echo '```json'
+                cat response.json
+                echo '```'
+                echo "</details>"
+              } >> "$GITHUB_STEP_SUMMARY"
+
+              if [[ "${http_code}" =~ ^(200|206|409)$ ]]; then
+                echo ""; echo "✅ Warmup OK (HTTP ${http_code})"
+                exit 0
+              fi
+
+              echo "⚠️  Warmup non riuscito (HTTP ${http_code}), backoff ${delay}s..."
+              sleep "${delay}"
+              if (( delay < 30 )); then delay=$(( delay * 2 )); fi
+            done
+
+            echo "❌ Warmup fallito dopo ${max_attempts} tentativi"
+            exit 1
