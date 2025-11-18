@@ -2,8 +2,8 @@ name: Cache warmup (last/next/rankings) – Campionato
 
 on:
   schedule:
-    - cron: "0 4,5 * * *"     # copre 06:00 ITA estate+inverno
-    - cron: "0 13,14 * * *"   # copre 15:00 ITA estate+inverno
+    - cron: "0 5 * * *"     # copre 05:00 ITA estate+inverno
+    - cron: "0 14 * * *"   # copre 14:00 ITA estate+inverno
   workflow_dispatch:
 
 jobs:

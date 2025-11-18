@@ -2,7 +2,10 @@ name: Live updates (poll) – Coppa
 
 on:
   schedule:
-    - cron: "*/20 * * * *"   # ogni 20 minuti, tutti i giorni
+    - cron: "*/20 * * * 1"   # ogni 20 minuti, solo LUNEDI
+    - cron: "*/20 * * * 5"   # ogni 20 minuti, solo VENERDI
+    - cron: "*/20 * * * 6"   # ogni 20 minuti, solo SABATO
+    - cron: "*/20 * * * 0"   # ogni 20 minuti, solo DOMENICA
   workflow_dispatch:
 
 jobs:
@@ -11,24 +14,7 @@ jobs:
 
     steps:
       # -------------------------------------------------------
-      # 1) Permetti l'esecuzione SOLO nei giorni corretti
-      #    (1=Lun, 5=Ven, 6=Sab, 7=Dom)
-      # -------------------------------------------------------
-      - name: Esegui solo in MON/FRI/SAT/SUN
-        run: |
-          set -e
-
-          day=$(date -u +%u)
-
-          if [[ "$day" != "1" && "$day" != "5" && "$day" != "6" && "$day" != "7" ]]; then
-            echo "⛔ Giorno non previsto: $day — workflow fermato."
-            exit 0
-          fi
-
-          echo "✅ Giorno valido: $day — procedo."
-
-      # -------------------------------------------------------
-      # 2) Esecuzione della chiamata alla tua API
+      # 1) Esecuzione della chiamata alla tua API
       # -------------------------------------------------------
       - name: Chiama /internal/cron/live-coppa
         env:

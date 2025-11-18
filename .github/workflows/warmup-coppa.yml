@@ -2,8 +2,8 @@ name: Cache warmup (last/next/rankings) – Coppa
 
 on:
   schedule:
-    - cron: "0 3,4 * * *"     # copre 05:00 ITA estate+inverno
-    - cron: "0 12,13 * * *"   # copre 14:00 ITA estate+inverno
+    - cron: "0 4 * * *"     # copre 04:00 ITA estate+inverno
+    - cron: "0 12 * * *"   # copre 12:00 ITA estate+inverno
   workflow_dispatch:
 
 jobs:
