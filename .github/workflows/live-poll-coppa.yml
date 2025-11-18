@@ -2,13 +2,34 @@ name: Live updates (poll) – Coppa
 
 on:
   schedule:
-    - cron: "*/20 * * * MON,FRI,SAT,SUN"
+    - cron: "*/20 * * * *"   # ogni 20 minuti, tutti i giorni
   workflow_dispatch:
 
 jobs:
   call-live-poll-coppa:
     runs-on: ubuntu-latest
+
     steps:
+      # -------------------------------------------------------
+      # 1) Permetti l'esecuzione SOLO nei giorni corretti
+      #    (1=Lun, 5=Ven, 6=Sab, 7=Dom)
+      # -------------------------------------------------------
+      - name: Esegui solo in MON/FRI/SAT/SUN
+        run: |
+          set -e
+
+          day=$(date -u +%u)
+
+          if [[ "$day" != "1" && "$day" != "5" && "$day" != "6" && "$day" != "7" ]]; then
+            echo "⛔ Giorno non previsto: $day — workflow fermato."
+            exit 0
+          fi
+
+          echo "✅ Giorno valido: $day — procedo."
+
+      # -------------------------------------------------------
+      # 2) Esecuzione della chiamata alla tua API
+      # -------------------------------------------------------
       - name: Chiama /internal/cron/live-coppa
         env:
           BACKEND_BASE_URL: https://astro-league-hub-api.onrender.com
@@ -16,7 +37,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          command -v jq >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y jq; }
+          # jq potrebbe non essere installato
+          command -v jq >/dev/null 2>&1 || {
+            sudo apt-get update
+            sudo apt-get install -y jq
+          }
 
           attempt=0
           max_attempts=3
@@ -26,7 +51,7 @@ jobs:
             attempt=$((attempt+1))
             echo "Tentativo $attempt/$max_attempts..."
 
-            : > response.json  # pre-crea il file, così gli step dopo non falliscono mai
+            : > response.json  # crea sempre il file per evitare errori futuri
 
             http_code=$(
               curl -sS -X POST \
@@ -39,8 +64,10 @@ jobs:
               || true
             )
 
-            # Se il file è vuoto (es. timeout rete), metti un JSON minimo
-            if [[ ! -s response.json ]]; then echo '{"success":false,"error":{"message":"no-body"}}' > response.json; fi
+            # se il body è vuoto, metti un JSON minimo
+            if [[ ! -s response.json ]]; then
+              echo '{"success":false,"error":{"message":"no-body"}}' > response.json
+            fi
 
             status=$(jq -r 'if .success==true then (.data.status // "ok") else (.error.message // "error") end' response.json 2>/dev/null || echo "unknown")
             log_compact=$(jq -c '.' response.json 2>/dev/null || tr -d '\n' < response.json)
@@ -65,11 +92,12 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
 
             if [[ "${http_code}" == "200" || "${http_code}" == "409" ]]; then
-              echo ""; echo "✅ Live poll Coppa OK (HTTP ${http_code})"
+              echo ""
+              echo "✅ Live poll Coppa OK (HTTP ${http_code})"
               exit 0
             fi
 
-            echo "⚠️  Live poll Coppa non riuscito (HTTP ${http_code}), backoff ${delay}s..."
+            echo "⚠️ Live poll Coppa non riuscito (HTTP ${http_code}), backoff ${delay}s..."
             sleep "${delay}"
             if (( delay < 30 )); then delay=$(( delay * 2 )); fi
           done
